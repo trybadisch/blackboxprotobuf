@@ -1,3 +1,5 @@
+# -*- coding: utf-8 -*-
+
 """These functions provide hooks into the blackboxprotobuf Burp extension,
 allowing certain functionality to be customized in order to handle non-standard
 applications.
@@ -53,6 +55,8 @@ applications.
 #                                          protobuf_data,
 #                                          IParameter.PARAM_URL))
 
+import base64
+import urllib
 
 def detect_protobuf(content, is_request, content_info, helpers):
     """Customize protobuf detection with a request or a response. Should return True if it is a protobuf,
@@ -63,7 +67,29 @@ def detect_protobuf(content, is_request, content_info, helpers):
     customer application functionality. You can also use "return True" to try
     to decode every request/response.
     """
-    pass
+    headers = [h.lower() for h in content_info.getHeaders()]
+    
+    for h in headers:
+        if h.startswith("content-type:"):
+            if "application/protobuf" in h or "x-protobuf" in h:
+                return None
+
+    if not is_request:
+        return None
+
+    if not any(h.startswith("content-type: application/x-www-form-urlencoded") for h in headers):
+        return None
+
+    for param in content_info.getParameters():
+        if param.getName() == "data_binary":
+            try:
+                decoded = urllib.unquote_plus(param.getValue())
+                base64.b64decode(decoded)
+                return True
+            except Exception:
+                return False
+
+    return None
 
 
 def get_protobuf_data(
@@ -77,7 +103,20 @@ def get_protobuf_data(
     has a non-standard encoding. It should return the raw protobuf bytes from
     the message.
     """
-    pass
+    headers = [h.lower() for h in content_info.getHeaders()]
+
+    for h in headers:
+        if h.startswith("content-type:"):
+            if "application/protobuf" in h or "x-protobuf" in h:
+                return None
+
+    if is_request:
+        for param in content_info.getParameters():
+            if param.getName() == "data_binary":
+                url_decoded = urllib.unquote_plus(param.getValue())
+                return base64.b64decode(url_decoded)
+
+    return None
 
 
 def set_protobuf_data(
@@ -101,7 +140,27 @@ def set_protobuf_data(
     helpers
     (https://portswigger.net/burp/extender/api/burp/iextensionhelpers.html#buildHttpMessage)
     """
-    pass
+    headers = [h.lower() for h in content_info.getHeaders()]
+
+    for h in headers:
+        if h.startswith("content-type:"):
+            if "application/protobuf" in h or "x-protobuf" in h:
+                return content
+
+    if is_request:
+        b64_data = base64.b64encode(protobuf_data)
+        url_encoded = urllib.quote_plus(b64_data)
+
+        for param in content_info.getParameters():
+            if param.getName() == "data_binary":
+                new_param = helpers.buildParameter(
+                    "data_binary",
+                    url_encoded,
+                    param.getType(),
+                )
+                return helpers.updateParameter(content, new_param)
+
+    return content
 
 
 def hash_message(
